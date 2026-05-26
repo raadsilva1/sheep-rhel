@@ -154,4 +154,4 @@ script.
 
 ## License
 
-MIT
+BSD 2-Clause "Simplified" License
