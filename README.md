@@ -30,6 +30,22 @@ cargo build --release
 
 The resulting binary is at `target/release/sheep-rhel`.
 
+### Build AppImage
+
+```bash
+make appimage
+```
+
+Or manually:
+
+```bash
+cargo build --release
+./scripts/build-appimage.sh
+```
+
+The resulting portable AppImage is at `target/release/sheep-rhel-x86_64.AppImage`.
+Both `sheep-rhel` and `sheep-run` are bundled inside.
+
 ### Run
 
 ```bash

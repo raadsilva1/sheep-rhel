@@ -29,6 +29,11 @@ crossterm = "0.28"
 dirs = "5.0"
 libc = "0.2.186"
 
+[package.metadata.appimage]
+name = "sheep-rhel"
+icon = "sheep-rhel.png"
+terminal = true
+
 [profile.release]
 opt-level = 3
 lto = true
