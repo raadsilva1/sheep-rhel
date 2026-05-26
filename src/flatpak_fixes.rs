@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use tracing::info;
 
 use crate::config::real_user_home;
+use crate::utils::is_dry_run;
 
 const FIREFOX_FONTCONFIG: &str = r#"<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -39,6 +40,10 @@ const FIREFOX_FONTCONFIG: &str = r#"<?xml version="1.0"?>
 
 /// Apply all Flatpak fixes (currently Firefox font rendering).
 pub fn apply() -> Result<()> {
+    if is_dry_run() {
+        info!("[DRY-RUN] Would apply Flatpak fixes");
+        return Ok(());
+    }
     fix_firefox_fonts()?;
     Ok(())
 }

@@ -42,7 +42,7 @@ pub async fn install_session(manifest: &mut Manifest) -> Result<()> {
     crate::utils::atomic_write(&target, content)?;
 
     // Fix SELinux context so GDM can read the file without policy denials.
-    let _ = run_command_logged("restorecon", &["-v", target.to_str().unwrap()], None).await;
+    let _ = run_command_logged("restorecon", &["-v", crate::utils::path_to_str(&target)?], None).await;
 
     // Clean up stale test files from earlier debugging.
     let stale_test = target_dir.join("river-gnome.desktop");

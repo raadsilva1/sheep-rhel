@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
             eprintln!("Error: --theme requires a theme name (or use --interactive).");
             std::process::exit(2);
         }
-        theme::apply_theme(&name).context("Failed to apply theme")?;
+        theme::apply_theme(&name, None).context("Failed to apply theme")?;
         return Ok(());
     }
 
@@ -179,7 +179,7 @@ async fn run_install(dry_run: bool, auto_install: bool) -> Result<()> {
 
     // Step 6/6: Apply default theme
     info!("Step 6/6: Applying default Red Hat theme...");
-    let theme_path = theme::apply_theme("rhel-red")
+    let theme_path = theme::apply_theme("rhel-red", Some(&mut manifest))
         .context("Step 6/6: Theme application failed")?;
     manifest.push(crate::utils::Artifact::File {
         path: theme_path,

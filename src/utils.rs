@@ -8,11 +8,23 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::config::manifest_path;
 
-/// Run an external command, capture stdout/stderr, and log output at the appropriate level.
+/// Convert a `Path` to a `&str`, returning a meaningful error if the path
+/// contains non-UTF-8 bytes.
+pub fn path_to_str(path: &std::path::Path) -> anyhow::Result<&str> {
+    path.to_str()
+        .with_context(|| format!("Path is not valid UTF-8: {}", path.display()))
+}
+
+/// Run an external command, capture stdout/stderr, and log all output at INFO level.
+///
+/// Both streams are logged as INFO because many programs (git, dnf, meson, zig)
+/// write routine status and progress messages to stderr.  The actual success or
+/// failure of the command is determined by the returned ExitStatus; stderr is
+/// not synonymous with an error.
 pub async fn run_command_logged(
     program: &str,
     args: &[&str],
@@ -50,7 +62,7 @@ pub async fn run_command_logged(
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            error!("[{} stderr] {}", prog_stderr, line);
+            info!("[{} stderr] {}", prog_stderr, line);
         }
     });
 

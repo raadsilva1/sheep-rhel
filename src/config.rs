@@ -47,6 +47,9 @@ pub const RIVER_DEFAULT_TAG: &str = "v0.3.9";
 pub const WMENU_GIT_URL: &str = "https://codeberg.org/adnano/wmenu.git";
 pub const WMENU_DEFAULT_TAG: &str = "main";
 
+pub const SWAYBG_GIT_URL: &str = "https://github.com/swaywm/swaybg.git";
+pub const SWAYBG_DEFAULT_TAG: &str = "v1.2.2";
+
 /// Installation prefix for software (binaries go in $prefix/bin).
 pub const BIN_PREFIX: &str = "/usr/local";
 

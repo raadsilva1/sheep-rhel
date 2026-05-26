@@ -6,34 +6,22 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tracing::{info, warn};
 
-use crate::config::{build_dir, real_user_config_dir, RIVER_DEFAULT_TAG, RIVER_GIT_URL, WMENU_GIT_URL, WMENU_DEFAULT_TAG, BIN_PREFIX};
+use crate::config::{build_dir, real_user_config_dir, RIVER_DEFAULT_TAG, RIVER_GIT_URL, WMENU_GIT_URL, WMENU_DEFAULT_TAG, SWAYBG_GIT_URL, SWAYBG_DEFAULT_TAG, BIN_PREFIX};
 use crate::theme::generate_river_init_script;
-use crate::utils::{atomic_write, chown_to_real_user, retry_with_backoff, run_command_logged, Manifest};
+use crate::utils::{atomic_write, chown_to_real_user, path_to_str, retry_with_backoff, run_command_logged, Manifest};
 
 const RIVER_BUILD_DIR: &str = "river";
 const WMENU_BUILD_DIR: &str = "wmenu";
+const SWAYBG_BUILD_DIR: &str = "swaybg";
 const ZIG014_URL: &str = "https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz";
 const ZIG014_DIR: &str = "zig-x86_64-linux-0.14.1";
 /// SHA256 checksum of the Zig 0.14.1 tarball (x86_64-linux).
 /// Verified against https://ziglang.org/download/0.14.1/
 const ZIG014_SHA256: &str = "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c";
 
-/// Convert a `Path` to a `&str`, returning a meaningful error if the path
-/// contains non-UTF-8 bytes.
-fn path_to_str(path: &Path) -> Result<&str> {
-    path.to_str()
-        .with_context(|| format!("Path is not valid UTF-8: {}", path.display()))
-}
-
 /// Verify the SHA256 checksum of a file against an expected hex digest.
 async fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
-    let output = run_command_logged("sha256sum", &[path_to_str(path)?], None).await?;
-    if !output.success() {
-        bail!("sha256sum command failed for {}", path.display());
-    }
-    // sha256sum outputs: "<hash>  <filename>"
-    // We only need the first 64 hex characters.
-    // Since run_command_logged only returns ExitStatus, we re-run with output capture.
+    // Capture sha256sum output directly.
     let output = tokio::process::Command::new("sha256sum")
         .arg(path_to_str(path)?)
         .output()
@@ -121,6 +109,9 @@ pub async fn lifecycle(manifest: &mut Manifest, dry_run: bool) -> Result<()> {
     let river_src = base.join(RIVER_BUILD_DIR);
 
     // Step 1: Clone (or switch tag if already present but wrong version)
+    // Note: we do NOT use --branch for tags because annotated tags fail
+    // with "is not a commit".  We clone normally and checkout the tag
+    // in a separate step.
     if !river_src.join(".git").exists() {
         info!("Cloning River from {}", RIVER_GIT_URL);
         if !dry_run {
@@ -128,7 +119,7 @@ pub async fn lifecycle(manifest: &mut Manifest, dry_run: bool) -> Result<()> {
             retry_with_backoff("git clone River", 5, 5000, || async {
                 let status = run_command_logged(
                     "git",
-                    &["clone", "--branch", RIVER_DEFAULT_TAG, RIVER_GIT_URL, path_to_str(&river_src)?],
+                    &["clone", RIVER_GIT_URL, path_to_str(&river_src)?],
                     None,
                 ).await?;
                 if !status.success() {
@@ -136,6 +127,14 @@ pub async fn lifecycle(manifest: &mut Manifest, dry_run: bool) -> Result<()> {
                 }
                 Ok(())
             }).await?;
+            let status = run_command_logged(
+                "git",
+                &["-C", path_to_str(&river_src)?, "checkout", RIVER_DEFAULT_TAG],
+                None,
+            ).await?;
+            if !status.success() {
+                bail!("git checkout River tag {} failed", RIVER_DEFAULT_TAG);
+            }
         }
     } else {
         info!("River source already present at {}", river_src.display());
@@ -249,6 +248,9 @@ pub async fn lifecycle(manifest: &mut Manifest, dry_run: bool) -> Result<()> {
 
     // Step 7: Build and install wmenu launcher
     ensure_wmenu(manifest, dry_run).await?;
+
+    // Step 7b: Build and install swaybg wallpaper daemon
+    ensure_swaybg(manifest, dry_run).await?;
 
     // Step 8: Ensure user is in input/video groups for device access
     ensure_user_groups(dry_run).await?;
@@ -388,6 +390,122 @@ async fn ensure_wmenu(manifest: &mut Manifest, dry_run: bool) -> Result<()> {
         info!("wmenu-run installed at {}", wmenu_run_bin_dst.display());
         manifest.push(crate::utils::Artifact::Binary {
             path: wmenu_run_bin_dst.clone(),
+        });
+    }
+
+    Ok(())
+}
+
+/// Clone, build, and install swaybg (wlroots wallpaper daemon).
+async fn ensure_swaybg(manifest: &mut Manifest, dry_run: bool) -> Result<()> {
+    let base = build_dir();
+    let swaybg_src = base.join(SWAYBG_BUILD_DIR);
+
+    if !swaybg_src.join(".git").exists() {
+        info!("Cloning swaybg from {}", SWAYBG_GIT_URL);
+        if !dry_run {
+            fs::create_dir_all(&base)?;
+            retry_with_backoff("git clone swaybg", 5, 5000, || async {
+                let status = run_command_logged(
+                    "git",
+                    &["clone", SWAYBG_GIT_URL, path_to_str(&swaybg_src)?],
+                    None,
+                ).await?;
+                if !status.success() {
+                    bail!("git clone swaybg failed");
+                }
+                Ok(())
+            }).await?;
+            let status = run_command_logged(
+                "git",
+                &["-C", path_to_str(&swaybg_src)?, "checkout", SWAYBG_DEFAULT_TAG],
+                None,
+            ).await?;
+            if !status.success() {
+                bail!("git checkout swaybg tag {} failed", SWAYBG_DEFAULT_TAG);
+            }
+        }
+    } else {
+        info!("swaybg source already present at {}", swaybg_src.display());
+        if !dry_run {
+            let describe_output = std::process::Command::new("git")
+                .args(["-C", path_to_str(&swaybg_src)?, "describe", "--tags", "--exact-match"])
+                .output();
+            let current_tag = describe_output
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            if current_tag != SWAYBG_DEFAULT_TAG {
+                warn!(
+                    "swaybg checkout is at '{}' but '{}' is required; switching...",
+                    current_tag, SWAYBG_DEFAULT_TAG
+                );
+                run_command_logged(
+                    "git",
+                    &["-C", path_to_str(&swaybg_src)?, "fetch", "origin", "tag", SWAYBG_DEFAULT_TAG, "--no-tags"],
+                    None,
+                ).await?;
+                run_command_logged(
+                    "git",
+                    &["-C", path_to_str(&swaybg_src)?, "checkout", "-f", SWAYBG_DEFAULT_TAG],
+                    None,
+                ).await?;
+            }
+        }
+    }
+
+    let swaybg_bin_dst = Path::new(BIN_PREFIX).join("bin").join("swaybg");
+
+    if swaybg_bin_dst.exists() {
+        info!("swaybg already installed");
+        return Ok(());
+    }
+
+    info!("Building swaybg with meson");
+    if !dry_run {
+        let build_path = swaybg_src.join("build");
+        if !build_path.exists() {
+            retry_with_backoff("meson setup swaybg", 5, 10000, || async {
+                let status = run_command_logged(
+                    "meson",
+                    &["setup", "build"],
+                    Some(&swaybg_src),
+                ).await?;
+                if !status.success() {
+                    bail!("meson setup swaybg failed");
+                }
+                Ok(())
+            }).await?;
+        }
+
+        retry_with_backoff("meson compile swaybg", 5, 10000, || async {
+            let status = run_command_logged(
+                "meson",
+                &["compile", "-C", "build"],
+                Some(&swaybg_src),
+            ).await?;
+            if !status.success() {
+                bail!("meson compile swaybg failed");
+            }
+            Ok(())
+        }).await?;
+
+        retry_with_backoff("meson install swaybg", 5, 10000, || async {
+            let status = run_command_logged(
+                "meson",
+                &["install", "-C", "build"],
+                Some(&swaybg_src),
+            ).await?;
+            if !status.success() {
+                bail!("meson install swaybg failed");
+            }
+            Ok(())
+        }).await?;
+    }
+
+    if swaybg_bin_dst.exists() || dry_run {
+        info!("swaybg installed at {}", swaybg_bin_dst.display());
+        manifest.push(crate::utils::Artifact::Binary {
+            path: swaybg_bin_dst.clone(),
         });
     }
 

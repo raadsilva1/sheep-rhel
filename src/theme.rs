@@ -226,7 +226,13 @@ pub fn generate_river_init_script(theme_name: &str) -> Result<String> {
 # ═══════════════════════════════════════════════════════
 riverctl border-color-focused {}
 riverctl border-color-unfocused {}
-riverctl background-color {}
+
+# Wallpaper — use redhat.png if present, otherwise fallback to theme background
+if [ -f "$HOME/Pictures/Wallpaper/redhat.png" ]; then
+    swaybg -o '*' -i "$HOME/Pictures/Wallpaper/redhat.png" -m fill &
+else
+    riverctl background-color {}
+fi
 
 # ═══════════════════════════════════════════════════════
 # Window appearance
@@ -301,8 +307,11 @@ riverctl map normal Super+Shift E exit
 }
 
 /// Write the selected theme to the River init script.
+///
+/// If `manifest` is provided, both the init script and the theme state file
+/// are recorded for rollback.
 #[must_use]
-pub fn apply_theme(theme_name: &str) -> Result<PathBuf> {
+pub fn apply_theme(theme_name: &str, manifest: Option<&mut crate::utils::Manifest>) -> Result<PathBuf> {
     let contents = generate_river_init_script(theme_name)?;
 
     let config_dir = real_user_config_dir().join("river");
@@ -325,7 +334,12 @@ pub fn apply_theme(theme_name: &str) -> Result<PathBuf> {
 
     // Persist theme state so sheep-run and other tools stay in sync.
     match write_theme_state(theme_name) {
-        Ok(path) => info!("Saved theme state to {}", path.display()),
+        Ok(path) => {
+            info!("Saved theme state to {}", path.display());
+            if let Some(m) = manifest {
+                m.push(crate::utils::Artifact::File { path: path.clone() });
+            }
+        }
         Err(e) => tracing::warn!("Failed to save theme state: {}", e),
     }
 
@@ -367,7 +381,8 @@ pub fn interactive_select() -> Result<String> {
             let items: Vec<ListItem> = names
                 .iter()
                 .map(|name| {
-                    let theme = find_theme(name).unwrap();
+                    let theme = find_theme(name)
+                        .expect("theme name from list_theme_names must exist in THEMES");
                     let preview = format!(
                         "  {:15} | focused: {} | bg: {}",
                         name, theme.window_border, theme.message_bg
@@ -503,5 +518,40 @@ mod tests {
         assert!(find_theme("crimson-night").is_some());
         assert!(find_theme("rh-silver").is_some());
         assert!(find_theme("ember-glow").is_some());
+    }
+
+    #[test]
+    fn wallpaper_logic_checks_for_redhat_png() {
+        let script = generate_river_init_script("rhel-red").unwrap();
+        assert!(
+            script.contains("$HOME/Pictures/Wallpaper/redhat.png"),
+            "init script must check for redhat.png wallpaper"
+        );
+    }
+
+    #[test]
+    fn wallpaper_uses_swaybg_when_present() {
+        let script = generate_river_init_script("rhel-red").unwrap();
+        assert!(
+            script.contains("swaybg -o '*'"),
+            "init script must launch swaybg for all outputs"
+        );
+        assert!(
+            script.contains("-m fill"),
+            "init script must use fill mode for wallpaper"
+        );
+    }
+
+    #[test]
+    fn wallpaper_fallback_to_background_color() {
+        let script = generate_river_init_script("rhel-red").unwrap();
+        assert!(
+            script.contains("else"),
+            "init script must have else branch for wallpaper fallback"
+        );
+        assert!(
+            script.contains("riverctl background-color"),
+            "init script must fall back to background-color when wallpaper is missing"
+        );
     }
 }
